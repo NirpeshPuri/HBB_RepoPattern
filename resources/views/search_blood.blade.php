@@ -202,6 +202,12 @@
             background-color: #5a6268;
         }
 
+        /* Loading Indicator */
+        .loading-indicator {
+            display: none;
+            margin: 10px 0;
+        }
+
         /* Responsive Styles */
         @media (max-width: 768px) {
             .form-container {
@@ -225,10 +231,17 @@
             }
         }
     </style>
-<!-- Receiver Blood Request Form -->
+
+    <!-- Receiver Blood Request Form -->
     <div class="center-container">
         <h1>Search for Blood</h1>
         <button id="findNearbyAdmins">Find Nearby Blood Banks</button>
+        <div class="loading-indicator" id="loadingIndicator">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <span>Finding nearby blood banks...</span>
+        </div>
 
         <!-- List of nearby admins -->
         <div id="nearbyAdmins" style="display: none;">
@@ -259,7 +272,7 @@
                 </div>
             </div>
 
-            <!-- Your exact form (right side) -->
+            <!-- Blood request form (right side) -->
             <div id="requestForm">
                 <h2>Submit Request</h2>
                 <form id="submitRequestForm" method="post" enctype="multipart/form-data">
@@ -284,7 +297,6 @@
                             <td><label for="user_phone">Phone:</label></td>
                             <td><input type="text" id="user_phone" name="user_phone" value="{{ auth()->user()->phone }}" disabled></td>
                         </tr>
-                        <!-- In your form section -->
                         <tr>
                             <td><label for="blood_group">Blood Group:</label></td>
                             <td>
@@ -324,7 +336,7 @@
                                     @if($userBloodType)
                                         Your blood type: {{ $userBloodType }} (showing compatible types)
                                     @else
-                                        Please set your blood type in your profile....
+                                        Please set your blood type in your profile
                                     @endif
                                 </small>
                             </td>
@@ -333,6 +345,7 @@
                             <td><label for="blood_quantity">Blood Quantity (Units):</label></td>
                             <td>
                                 <input type="number" id="blood_quantity" name="blood_quantity" min="1" max="5" required>
+                                <small class="text-muted">1 unit = 500 NPR</small>
                             </td>
                         </tr>
                         <tr>
@@ -344,7 +357,7 @@
                                     <option value="Normal" selected>Normal</option>
                                 </select>
                                 <small class="text-muted">
-                                        Rare Blood Type are (AB-, B-, A-)
+                                    Rare Blood Types are (AB-, B-, A-)
                                 </small>
                             </td>
                         </tr>
@@ -354,16 +367,12 @@
                                 <input type="number" id="payment" name="payment" readonly>
                             </td>
                         </tr>
-                        <script>
-                        document.getElementById('blood_quantity').addEventListener('input', function () {
-                       let units = parseInt(this.value) || 0;
-                       let payment = units * 500;
-                       document.getElementById('payment').value = payment;
-                         });
-                        </script>
                         <tr>
                             <td><label for="request_form">Upload Hospital Form (Proof):</label></td>
-                            <td><input type="file" id="request_form" name="request_form" accept="image/*" required></td>
+                            <td>
+                                <input type="file" id="request_form" name="request_form" accept="image/*,.pdf" required>
+                                <small class="text-muted">Acceptable formats: JPG, PNG, PDF (Max 2MB)</small>
+                            </td>
                         </tr>
                         <tr>
                             <td colspan="2">
@@ -379,79 +388,72 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
         $(document).ready(function() {
+            // Initialize payment calculation
+            $('#blood_quantity').on('input', function() {
+                const units = parseInt($(this).val()) || 0;
+                $('#payment').val(units * 500);
+            });
+
             // Find nearby admins
             $('#findNearbyAdmins').click(function() {
                 if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition(function(position) {
-                        $.ajax({
-                            url: "{{ route('find.nearby.admins') }}",
-                            type: "POST",
-                            data: {
-                                latitude: position.coords.latitude, //Here the user current location position will be fetch temporary
-                                longitude: position.coords.longitude,
-                                _token: "{{ csrf_token() }}"
-                            },
-                            success: function(response) {
-                                $('#nearbyAdmins').show();
-                                $('#adminList').empty();
-                                response.forEach(function(admin) {
-                                    $('#adminList').append(
-                                        `<li>
-                                    ${admin.name} (${admin.distance.toFixed(2)} km)
-                                    <button onclick="selectAdmin(${admin.id}, '${admin.name.replace(/'/g, "\\'")}')">
-                                        Select
-                                    </button>
-                                </li>`
-                                    );
-                                });
-                            }
-                        });
-                    });
+                    $('#loadingIndicator').show();
+                    $('#findNearbyAdmins').prop('disabled', true);
+                    
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            $.ajax({
+                                url: "{{ route('find.nearby.admins') }}",
+                                type: "POST",
+                                data: {
+                                    latitude: position.coords.latitude,
+                                    longitude: position.coords.longitude,
+                                    _token: "{{ csrf_token() }}"
+                                },
+                                success: function(response) {
+                                    $('#loadingIndicator').hide();
+                                    $('#findNearbyAdmins').prop('disabled', false);
+                                    
+                                    if (response.admins && response.admins.length > 0) {
+                                        $('#nearbyAdmins').show();
+                                        $('#adminList').empty();
+                                        
+                                        response.admins.forEach(function(admin) {
+                                            $('#adminList').append(
+                                                `<li>
+                                                    ${admin.name} (${admin.distance})
+                                                    <button onclick="selectAdmin(${admin.id}, '${admin.name.replace(/'/g, "\\'")}')">
+                                                        Select
+                                                    </button>
+                                                </li>`
+                                            );
+                                        });
+                                    } else {
+                                        alert('No nearby blood banks found in your area.');
+                                    }
+                                },
+                                error: function(xhr) {
+                                    $('#loadingIndicator').hide();
+                                    $('#findNearbyAdmins').prop('disabled', false);
+                                    alert('Error fetching nearby blood banks. Please try again.');
+                                }
+                            });
+                        },
+                        function(error) {
+                            $('#loadingIndicator').hide();
+                            $('#findNearbyAdmins').prop('disabled', false);
+                            alert('Error getting your location: ' + error.message);
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 0
+                        }
+                    );
                 } else {
                     alert('Geolocation is not supported by this browser.');
                 }
             });
-
-            // Function to select an admin and show their blood stock
-            window.selectAdmin = function(adminId, adminName) {
-                $('#adminId').val(adminId);
-                $('#adminNameDisplay').val(adminName);
-
-                // Fetch blood stock directly from blood_banks table
-                $.ajax({
-                    url: `/blood-banks/${adminId}/stock`,
-                    type: "GET",
-                    success: function(stockData) {
-                        // Populate the stock table
-                        const stockTableBody = $('#stockTableBody');
-                        stockTableBody.empty();
-
-                        // Define all blood types
-                        const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-
-                        // Create table rows for each blood type
-                        bloodTypes.forEach(type => {
-                            const quantity = stockData[type] || 0;
-                            const rowClass = quantity === 0 ? 'text-danger' : (quantity < 10 ? 'text-warning' : '');
-
-                            stockTableBody.append(
-                                `<tr>
-                            <td class="${rowClass}">${type}</td>
-                            <td class="${rowClass}">${quantity} units</td>
-                        </tr>`
-                            );
-                        });
-
-                        // Show the stock display and form
-                        $('#stockDisplay').show();
-                        $('#requestForm').show();
-                        $('#changeAdmin').show();
-                    },
-                    error: function() {
-                        alert('Failed to load blood stock information');
-                    }
-                });
-            };
 
             // Change admin button
             $('#changeAdmin').click(function() {
@@ -461,15 +463,21 @@
             });
 
             // Form submission
-            // Form submission
             $('#submitRequestForm').on('submit', function(e) {
                 e.preventDefault();
-
+                
+                const form = $(this);
+                const submitBtn = $('#submitRequest');
+                const originalBtnText = submitBtn.text();
+                
+                submitBtn.prop('disabled', true);
+                submitBtn.text('Processing...');
+                
                 const selectedBloodGroup = $('#blood_group').val();
                 const requestedQuantity = parseInt($('#blood_quantity').val());
                 const adminId = $('#adminId').val();
 
-                // Fetch the current stock before submitting
+                // First verify stock availability
                 $.ajax({
                     url: `/blood-banks/${adminId}/stock`,
                     type: 'GET',
@@ -477,13 +485,15 @@
                         const availableQuantity = stockData[selectedBloodGroup] || 0;
 
                         if (requestedQuantity > availableQuantity) {
+                            submitBtn.prop('disabled', false);
+                            submitBtn.text(originalBtnText);
                             alert(`Requested quantity exceeds available stock. Only ${availableQuantity} units of ${selectedBloodGroup} available.`);
                             return;
                         }
 
-                        // Proceed with form submission if stock is sufficient
-                        const formData = new FormData($('#submitRequestForm')[0]);
-
+                        // If stock is sufficient, submit the form
+                        const formData = new FormData(form[0]);
+                        
                         $.ajax({
                             url: "{{ route('submit.blood.request') }}",
                             type: "POST",
@@ -498,32 +508,73 @@
                                 }
                             },
                             error: function(xhr) {
-                                let errorMsg = 'Request failed';
-                                try {
-                                    const response = JSON.parse(xhr.responseText);
-                                    if (response.message) {
-                                        errorMsg = response.message;
-                                    } else if (response.errors) {
-                                        errorMsg = Object.values(response.errors).join('\n');
-                                    }
-                                } catch (e) {
-                                    console.error('Error parsing error response:', e);
+                                submitBtn.prop('disabled', false);
+                                submitBtn.text(originalBtnText);
+                                
+                                let errorMsg = 'Request failed. Please try again.';
+                                if (xhr.responseJSON && xhr.responseJSON.message) {
+                                    errorMsg = xhr.responseJSON.message;
+                                } else if (xhr.responseJSON && xhr.responseJSON.errors) {
+                                    errorMsg = Object.values(xhr.responseJSON.errors).join('\n');
                                 }
-                                alert('Error: ' + errorMsg);
+                                alert(errorMsg);
                             }
                         });
                     },
                     error: function() {
-                        alert('Failed to verify blood stock before submitting.');
+                        submitBtn.prop('disabled', false);
+                        submitBtn.text(originalBtnText);
+                        alert('Failed to verify blood stock. Please try again.');
                     }
                 });
             });
-
         });
 
+        // Function to select an admin and show their blood stock
+        window.selectAdmin = function(adminId, adminName) {
+            $('#adminId').val(adminId);
+            $('#adminNameDisplay').val(adminName);
+            $('#changeAdmin').show();
+            
+            // Show loading state
+            $('#stockDisplay').show().html('<p>Loading blood stock information...</p>');
+            $('#requestForm').hide();
 
+            // Fetch blood stock
+            $.ajax({
+                url: `/blood-banks/${adminId}/stock`,
+                type: "GET",
+                success: function(stockData) {
+                    // Populate the stock table
+                    const stockTableBody = $('#stockTableBody');
+                    stockTableBody.empty();
 
+                    // Define all blood types
+                    const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
+                    // Create table rows for each blood type
+                    bloodTypes.forEach(type => {
+                        const quantity = stockData[type] || 0;
+                        const rowClass = quantity === 0 ? 'text-danger' : (quantity < 5 ? 'text-warning' : '');
+
+                        stockTableBody.append(
+                            `<tr>
+                                <td class="${rowClass}">${type}</td>
+                                <td class="${rowClass}">${quantity} units</td>
+                            </tr>`
+                        );
+                    });
+
+                    // Show the form
+                    $('#requestForm').show();
+                },
+                error: function() {
+                    $('#stockDisplay').html('<p class="text-danger">Failed to load blood stock information</p>');
+                }
+            });
+        };
+
+        // Function to handle blood type selection and request type validation
         function checkBloodType() {
             const bloodGroupSelect = document.getElementById('blood_group');
             const selectedOption = bloodGroupSelect.options[bloodGroupSelect.selectedIndex];
@@ -532,16 +583,13 @@
             const requestTypeSelect = document.getElementById('request_type');
 
             if (isRare) {
-                // Enable the Rare option
                 rareOption.disabled = false;
                 rareOption.textContent = 'Rare';
-
-                // If current selection is disabled, switch to Normal
+                
                 if (requestTypeSelect.value === 'Rare' && rareOption.disabled) {
                     requestTypeSelect.value = 'Normal';
                 }
             } else {
-                // Disable Rare option and switch to Normal if currently selected
                 rareOption.disabled = true;
                 if (requestTypeSelect.value === 'Rare') {
                     requestTypeSelect.value = 'Normal';
@@ -549,12 +597,13 @@
             }
         }
 
-        // Initialize on page load and whenever blood group changes
+        // Initialize form validation
         document.addEventListener('DOMContentLoaded', function() {
             checkBloodType();
-
-            // Also check when blood group changes
             document.getElementById('blood_group').addEventListener('change', checkBloodType);
+            
+            // Trigger initial payment calculation
+            $('#blood_quantity').trigger('input');
         });
     </script>
 @endsection

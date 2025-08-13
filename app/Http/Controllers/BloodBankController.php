@@ -1,28 +1,64 @@
 <?php
+
 namespace App\Http\Controllers;
 
-use App\Models\BloodBank;
 use Illuminate\Http\Request;
+use App\Repository\interfaces\BloodBankRepositoryInterface;
 
 class BloodBankController extends Controller
 {
-    public function __construct()
+    private $bloodBankRepo;
+
+    /**
+     * Inject the BloodBankRepositoryInterface.
+     */
+    public function __construct(BloodBankRepositoryInterface $bloodBankRepo)
     {
+        $this->bloodBankRepo = $bloodBankRepo;
         $this->middleware('auth:admin');
     }
 
+    /**
+     * GET: Show the current admin's blood bank.
+     */
     public function show()
     {
-        $bloodBank = BloodBank::currentAdminBank();
-        return view('blood_banks.show', compact('bloodBank'));
+        try {
+            $bloodBank = $this->bloodBankRepo->getCurrentAdminBank();
+            return response()->json([
+                'success' => true,
+                'data' => $bloodBank
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 400);
+        }
     }
 
+    /**
+     * GET: Show the update stock form (return current stock as JSON).
+     */
     public function updateStockForm()
     {
-        $bloodBank = BloodBank::currentAdminBank();
-        return view('blood_banks.update_stock', compact('bloodBank'));
+        try {
+            $bloodBank = $this->bloodBankRepo->getCurrentAdminBank();
+            return response()->json([
+                'success' => true,
+                'data' => $bloodBank
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 400);
+        }
     }
 
+    /**
+     * POST: Update blood stock (RESTful).
+     */
     public function updateStock(Request $request)
     {
         $validated = $request->validate([
@@ -31,18 +67,30 @@ class BloodBankController extends Controller
             'quantity' => 'required|integer|min:1'
         ]);
 
-        $bloodBank = BloodBank::currentAdminBank();
-        $quantity = $validated['operation'] === 'add'
-            ? $validated['quantity']
-            : -$validated['quantity'];
+        try {
+            $quantity = $validated['operation'] === 'add' 
+                ? $validated['quantity'] 
+                : -$validated['quantity'];
 
-        if (!$bloodBank->updateStock($validated['blood_type'], $quantity)) {
-            return back()->with('error', 'Not enough blood to deduct.');
+            $success = $this->bloodBankRepo->updateStock($validated['blood_type'], $quantity);
+
+            if (!$success) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Not enough blood to deduct.'
+                ], 400);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Blood stock updated successfully.'
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update stock. ' . $e->getMessage()
+            ], 400);
         }
-
-        return redirect()->route('blood-banks.show')
-            ->with('success', 'Blood stock updated successfully');
     }
-
-
 }

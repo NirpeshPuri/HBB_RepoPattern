@@ -2,14 +2,27 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use App\Models\Contact;
+use App\Repository\interfaces\ContactRepositoryInterface;
 
 class ContactController extends Controller
 {
+    private $contactRepo;
+
+    /**
+     * Inject the ContactRepositoryInterface.
+     */
+    public function __construct(ContactRepositoryInterface $contactRepo)
+    {
+        $this->contactRepo = $contactRepo;
+    }
+
+    /**
+     * POST: Submit contact form (RESTful).
+     */
     public function submitForm(Request $request)
     {
         // Validate the form data
-        $request->validate([
+        $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|max:255',
             'phone' => 'required|string|max:20',
@@ -17,19 +30,19 @@ class ContactController extends Controller
         ]);
 
         try {
-            // Save the data to the database
-            Contact::create([
-                'name' => $request->name,
-                'email' => $request->email,
-                'phone' => $request->phone,
-                'message' => $request->message,
-            ]);
+            // Store the contact message using repository
+            $this->contactRepo->create($validated);
 
-            // Redirect back with a success message
-            return redirect()->back()->with('success', 'Your message has been saved successfully!');
+            // Return JSON response (RESTful)
+            return response()->json([
+                'success' => true,
+                'message' => 'Your message has been saved successfully!'
+            ]);
         } catch (\Exception $e) {
-            // Redirect back with an error message
-            return redirect()->back()->with('error', 'Something went wrong. Please try again.');
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong. Please try again.'
+            ], 500);
         }
     }
 }

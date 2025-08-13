@@ -1,52 +1,39 @@
 <?php
 
 namespace App\Http\Controllers;
-use App\Models\User;
+
 use Illuminate\Http\Request;
+use App\Models\User;
+use App\Repository\interfaces\UserRepositoryInterface;
 
 class UserController extends Controller
 {
-    // Dashboard for receivers
-    public function receiverDashboard()
+    protected $userRepo;
+
+    public function __construct(UserRepositoryInterface $userRepo)
     {
-        return view('receiver_dashboard');
+        $this->userRepo = $userRepo;
     }
 
-    // Dashboard for donors
+    public function receiverDashboard()
+    {
+        return response()->json($this->userRepo->receiverDashboard());
+    }
+
     public function donorDashboard()
     {
-        return view('donor_dashboard');
+        return response()->json($this->userRepo->donorDashboard());
     }
 
     public function index()
     {
-        $users = User::where('user_type', '!=', 'admin')
-            ->select([
-                'id',
-                'name',
-                'age',
-                'weight',
-                'address',
-                'phone',
-                'blood_type',
-                'user_type',
-                'email',
-                'created_at'
-            ])
-            ->latest()
-            ->paginate(10);
-
-        return view('admin.user_detail', compact('users'));
+        $users = $this->userRepo->index();
+        return response()->json($users);
     }
 
     public function destroy(User $user)
     {
-        if ($user->user_type === 'admin') {
-            return back()->with('error', 'Cannot delete admin users');
-        }
-
-        $user->delete();
-        return redirect()->route('admin.user_detail')
-            ->with('success', 'User deleted successfully');
+        $result = $this->userRepo->destroy($user);
+        return response()->json($result);
     }
 }

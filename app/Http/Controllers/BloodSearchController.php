@@ -2,311 +2,188 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Admin;
-use App\Models\BloodRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\Rule;
+use App\Repository\interfaces\BloodSearchRepositoryInterface;
+use App\Http\Request\BloodSearchRequest;
 
-//Update BloodSearchController
 class BloodSearchController extends Controller
 {
+    public function __construct(protected BloodSearchRepositoryInterface $bloodSearchRepo)
+    {
+    }
+
+    /**
+     * GET /api/blood-requests
+     * List all blood requests of the authenticated user
+     */
     public function index()
     {
-        return view('search_blood');
-    }
-
-    public function findNearbyAdmins(Request $request)
-    {
-        //here it request the current position of receiver
-        $request->validate([
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric'
-        ]);
-
-        //here the admin location is fetch
-        $admins = Admin::select(['id', 'name', 'latitude', 'longitude'])->get();
-
-        $adminsWithDistance = $admins->map(function ($admin) use ($request) {
-            $admin->distance = $this->calculateDistance(
-                $request->latitude,
-                $request->longitude,
-                $admin->latitude,
-                $admin->longitude
-            );
-            return $admin;
-        });
-
-        return response()->json($adminsWithDistance->sortBy('distance')->values());
-    }
-
-    private function calculateDistance($lat1, $lon1, $lat2, $lon2)
-    {
-        $earthRadius = 6371;
-        $latFrom = deg2rad($lat1);
-        $lonFrom = deg2rad($lon1);
-        $latTo = deg2rad($lat2);
-        $lonTo = deg2rad($lon2);
-
-        $latDelta = $latTo - $latFrom;
-        $lonDelta = $lonTo - $lonFrom;
-
-        $angle = 2 * asin(sqrt(pow(sin($latDelta / 2), 2) +
-                cos($latFrom) * cos($latTo) * pow(sin($lonDelta / 2), 2)));
-        return $angle * $earthRadius;
-    }
-
-    public function submitRequest(Request $request)
-    {
-        $request->validate([
-            'admin_id' => 'required|exists:admins,id',
-            'blood_group' => 'required|in:A+,A-,B+,B-,O+,O-,AB+,AB-',
-            'blood_quantity' => 'required|integer|min:1|max:5',
-            'request_type' => [
-                'required',
-                Rule::in(['Emergency', 'Normal', 'Rare']),
-                function ($attribute, $value, $fail) use ($request) {
-                    $rareBloodTypes = ['AB-', 'B-', 'A-'];
-                    if ($value === 'Rare' && !in_array($request->blood_group, $rareBloodTypes)) {
-                        $fail('Rare request type can only be selected for rare blood types (AB-, B-, A-)');
-                    }
-                }
-            ],
-            'request_form' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
-            'payment' => 'required|numeric|min:0',
-        ]);
-
-        $user = Auth::user();
-        $imageName = time().'.'.$request->file('request_form')->getClientOriginalExtension();
-        $request->file('request_form')->move(public_path('assets/request_forms'), $imageName);
-        $imagePath = 'assets/request_forms/'.$imageName;
-
-        // Store data in session (not DB yet)
-
-
-        $request->session()->put('blood_request', [
-            'id' => $request->id,
-            'user_id' => $user->id,
-            'admin_id' => $request->admin_id,
-            'user_name' => $user->name,
-            'email' => $user->email,
-            'phone' => $user->phone,
-            'blood_group' => $request->blood_group,
-            'blood_quantity' => $request->blood_quantity,
-            'request_type' => $request->request_type,
-            'request_form' => $imagePath,
-            'payment' => $request->payment,
-        ]);
+        $userId = Auth::id();
+        $requests = $this->bloodSearchRepo->getUserBloodRequests($userId);
 
         return response()->json([
             'success' => true,
-            'message' => 'Request prepared, proceed to payment.',
-            'redirect_url' => route('payment.page'),
+            'data' => $requests
         ]);
     }
 
-    public function showPaymentPage(Request $request)
+    /**
+     * POST /api/blood-requests
+     * Create a new blood request
+     */
+    public function store(BloodSearchRequest $request)
     {
-        $bloodRequest = $request->session()->get('blood_request');
+        $user = Auth::user();
 
-        if (!$bloodRequest) {
-            return redirect()->route('search_blood')->with('error', 'No blood request found to process payment');
+        //$validated = $this->bloodSearchRepo->validateBloodRequest($request->all());
+        $validated= $request->validatedData();
+        if (!$validated['success']) {
+            return response()->json(['errors' => $validated['errors']], 422);
         }
 
-        return view('receiver.payment', [
-            'bloodRequest' => $bloodRequest,
-            'payment' => $bloodRequest['payment'],
-            'blood_quantity' => $bloodRequest['blood_quantity']
+        $data = $validated['data'];
+        $data['user_id'] = $user->id;
+        $data['user_name'] = $user->name;
+        $data['email'] = $user->email;
+        $data['phone'] = $user->phone;
+
+        if ($request->hasFile('request_form')) {
+            $data['request_form'] = $this->bloodSearchRepo->storeRequestForm($request->file('request_form'));
+        }
+
+        $bloodRequest = $this->bloodSearchRepo->createBloodRequest($data);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Blood request created successfully.',
+            'data' => $bloodRequest
+        ], 201);
+    }
+
+    /**
+     * GET /api/blood-requests/{id}
+     * Show a single blood request
+     */
+    public function show($id)
+    {
+        $userId = Auth::id();
+        $bloodRequest = $this->bloodSearchRepo->getUserBloodRequestById($userId, $id);
+
+        if (!$bloodRequest) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Blood request not found'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $bloodRequest
         ]);
     }
 
-    public function processPayment(Request $request)
+    /**
+     * PATCH /api/blood-requests/{id}
+     * Update an existing blood request
+     */
+    public function update(Request $request, $id)
     {
+        $userId = Auth::id();
 
-        // Get the complete blood request from session
-        $bloodRequest = $request->session()->get('blood_request');
-
+        $bloodRequest = $this->bloodSearchRepo->getUserBloodRequestById($userId, $id);
         if (!$bloodRequest) {
-            return redirect()->route('search_blood')->with('error', 'Session expired. Please start over.');
+            return response()->json([
+                'success' => false,
+                'message' => 'Blood request not found'
+            ], 404);
         }
 
-        // Validate the input
+        if (!$bloodRequest->canEdit()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot edit this request.'
+            ], 403);
+        }
+
+        $validated = $this->bloodSearchRepo->validateBloodRequest($request->all(), $id);
+
+        if (!$validated['success']) {
+            return response()->json(['errors' => $validated['errors']], 422);
+        }
+
+        $data = $validated['data'];
+
+        if ($request->hasFile('request_form')) {
+            $data['request_form'] = $this->bloodSearchRepo->updateRequestForm($bloodRequest, $request->file('request_form'));
+        }
+
+        $updatedRequest = $this->bloodSearchRepo->updateBloodRequest($id, $data);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Blood request updated successfully',
+            'data' => $updatedRequest
+        ]);
+    }
+
+    /**
+     * DELETE /api/blood-requests/{id}
+     * Delete a blood request
+     */
+    public function destroy($id)
+    {
+        $userId = Auth::id();
+
+        $bloodRequest = $this->bloodSearchRepo->getUserBloodRequestById($userId, $id);
+        if (!$bloodRequest) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Blood request not found'
+            ], 404);
+        }
+
+        if (!$bloodRequest->canEdit()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete this request.'
+            ], 403);
+        }
+
+        $this->bloodSearchRepo->deleteBloodRequest($bloodRequest);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Blood request deleted successfully'
+        ]);
+    }
+
+    /**
+     * POST /api/blood-requests/{id}/payment
+     * Process payment for a blood request
+     */
+    public function processPayment(Request $request, $id)
+    {
+        $userId = Auth::id();
+        $bloodRequest = $this->bloodSearchRepo->getUserBloodRequestById($userId, $id);
+
+        if (!$bloodRequest) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Blood request not found'
+            ], 404);
+        }
+
         $validated = $request->validate([
-            'blood_quantity' => 'required|integer|min:1|max:5',
-            'payment' => [
-                'required',
-                'numeric',
-                function($attribute, $value, $fail) use ($request) {
-                    $expected = $request->blood_quantity * 500;
-                    if (abs($value - $expected) > 0.01) {
-                        $fail('Payment amount should be NPR '.$expected.' for '.$request->blood_quantity.' units');
-                    }
-                }
-            ],
-            // Include validation for all hidden fields
-            'admin_id' => 'required|exists:admins,id',
-            'blood_group' => 'required|in:A+,A-,B+,B-,O+,O-,AB+,AB-',
-            'request_type' => 'required|in:Emergency,Normal,Rare',
-            'request_form' => 'required|string',
+            'payment' => 'required|numeric|min:0'
         ]);
 
-        // Update the session data
-        $updatedRequest = array_merge($bloodRequest, [
-            'blood_quantity' => (int)$validated['blood_quantity'],
-            'payment' => (float)$validated['payment']
+        $updatedRequest = $this->bloodSearchRepo->processPayment($bloodRequest, $validated['payment']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Payment processed successfully',
+            'data' => $updatedRequest
         ]);
-
-        $request->session()->put('blood_request', $updatedRequest);
-        $request->session()->save(); // Explicitly save
-
-        return redirect()->route('process.esewa.payment');
-
-
-    }
-
-    public function processEsewaPayment(Request $request)
-    {
-        $bloodRequest = $request->session()->get('blood_request');
-
-        if (!$bloodRequest) {
-            return redirect()->route('search_blood')->with('error', 'No blood request found');
-        }
-
-        // 🔄 Merge new values instead of overwriting everything
-        $updated = array_merge($bloodRequest, [
-            'blood_quantity' => $request->blood_quantity,
-            'payment' => $request->payment,
-        ]);
-
-        $request->session()->put('blood_request', $updated);
-
-        // Now $bloodRequest will have updated data
-        $transaction_uuid = uniqid('txn_') . time();
-        $secret_key = "8gBm/:&EnhH.1/q";
-        $product_code = "EPAYTEST";
-
-        $signature_string = "total_amount={$updated['payment']},transaction_uuid={$transaction_uuid},product_code={$product_code}";
-        $signature = base64_encode(hash_hmac('sha256', $signature_string, $secret_key, true));
-
-        return view('receiver.esewa_payment', [
-            'bloodRequest' => $updated,
-            'amount' => $updated['payment'],
-            'tax_amount' => 0,
-            'total_amount' => $updated['payment'],
-            'transaction_uuid' => $transaction_uuid,
-            'product_code' => $product_code,
-            'success_url' => route('payment.success'),
-            'failure_url' => route('payment.failure'),
-            'signature' => $signature,
-            'signed_field_names' => 'total_amount,transaction_uuid,product_code',
-        ]);
-    }
-
-
-
-    public function paymentSuccess(Request $request)
-    {
-        try {
-            // Get the JSON data from the URL parameter
-            $jsonData = $request->input('data');
-            $paymentData = json_decode(base64_decode($jsonData), true);
-
-            if (!$paymentData) {
-                throw new \Exception('Invalid payment data received');
-            }
-
-            // Extract needed values
-            $transactionId = $paymentData['transaction_uuid'] ?? null;
-            $amount = $paymentData['total_amount'] ?? null;
-            $status = $paymentData['status'] ?? null;
-
-            $sessionData = $request->session()->get('blood_request');
-            if (!$sessionData) {
-                throw new \Exception('Session expired. Please submit your request again.');
-            }
-
-            // Verify payment status
-            if ($status !== 'COMPLETE') {
-                throw new \Exception('Payment not completed');
-            }
-
-            // Create blood request record
-            $bloodRequest = BloodRequest::create([
-                'user_id' => $sessionData['user_id'],
-                'admin_id' => $sessionData['admin_id'],
-                'user_name' => $sessionData['user_name'],
-                'email' => $sessionData['email'],
-                'phone' => $sessionData['phone'],
-                'blood_group' => $sessionData['blood_group'],
-                'blood_quantity' => $sessionData['blood_quantity'],
-                'request_type' => $sessionData['request_type'],
-                'request_form' => $sessionData['request_form'],
-                'payment' => $this->formatAmount($amount), // Clean amount
-                'payment_status' => 'paid',
-                'transaction_id' => $transactionId,
-                'status' => 'pending'
-            ]);
-
-            // Clear session
-            $request->session()->forget(['blood_request', 'transaction_uuid']);
-
-            return view('payment_success', [
-                'request_id' => $bloodRequest->id,
-                'transaction_id' => $transactionId,
-                'amount' => number_format($this->formatAmount($amount), 2)
-            ]);
-
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Payment processing failed: ' . $e->getMessage());
-            return redirect()->route('payment.failure')
-                ->with('error', $e->getMessage())
-                ->with('transaction_id', $transactionId ?? null);
-        }
-    }
-
-    private function formatAmount($amount)
-    {
-        // Convert "1,000.00" to 1000.00
-        return str_replace(',', '', $amount);
-    }
-
-
-    public function paymentFailure(Request $request)
-    {
-        return view('payment_failure');
-    }
-
-    private function verifyEsewaPayment($refId, $oid, $amount)
-    {
-        // For testing environment, skip verification
-        if (app()->environment('local', 'testing')) {
-            return true;
-        }
-
-        try {
-            $verificationUrl = "https://rc-epay.esewa.com.np/api/epay/transaction/status/".$oid;
-
-            $client = new \GuzzleHttp\Client();
-            $response = $client->request('POST', $verificationUrl, [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                ],
-                'json' => [
-                    'transaction_uuid' => $oid,
-                    'total_amount' => $amount
-                ]
-            ]);
-
-            $responseData = json_decode($response->getBody(), true);
-
-            return isset($responseData['status']) &&
-                $responseData['status'] === 'COMPLETE' &&
-                $responseData['total_amount'] == $amount &&
-                $responseData['transaction_uuid'] == $oid;
-
-        } catch (\Exception $e) {
-            //\Log::error('eSewa verification failed: '.$e->getMessage());
-            return false;
-        }
     }
 }
