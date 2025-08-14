@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Repositories;
+namespace App\Repository;
 
-use App\Repositories\Interfaces\DonorRepositoryInterface;
+use App\Repository\interfaces\DonorRepositoryInterface;
 use App\Models\DonateBlood;
 use App\Models\Admin;
 use Illuminate\Http\Request;
@@ -13,7 +13,6 @@ class DonorRepository implements DonorRepositoryInterface
 {
     public function showDonationPage()
     {
-        // Just returning a JSON message instead of a view for API
         return ['message' => 'Donation page data can be returned here'];
     }
 
@@ -26,7 +25,7 @@ class DonorRepository implements DonorRepositoryInterface
 
         return [
             'eligible' => !$lastDonation,
-            'next_donation_date' => $lastDonation ? $lastDonation->donation_date->addMonths(3) : null
+            'next_donation_date' => $lastDonation ? $lastDonation->donation_date->addMonths(3) : null,
         ];
     }
 
@@ -34,17 +33,13 @@ class DonorRepository implements DonorRepositoryInterface
     {
         $request->validate([
             'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric'
+            'longitude' => 'required|numeric',
         ]);
 
-        $admins = Admin::select(['id', 'name', 'latitude', 'longitude'])->get()
+        $admins = Admin::select(['id', 'name', 'latitude', 'longitude'])
+            ->get()
             ->map(function ($admin) use ($request) {
-                $admin->distance = $this->calculateDistance(
-                    $request->latitude,
-                    $request->longitude,
-                    $admin->latitude,
-                    $admin->longitude
-                );
+                $admin->distance = $this->calculateDistance($request->latitude, $request->longitude, $admin->latitude, $admin->longitude);
                 return $admin;
             })
             ->sortBy('distance')
@@ -64,8 +59,7 @@ class DonorRepository implements DonorRepositoryInterface
         $latDelta = $latTo - $latFrom;
         $lonDelta = $lonTo - $lonFrom;
 
-        $angle = 2 * asin(sqrt(pow(sin($latDelta / 2), 2) +
-                cos($latFrom) * cos($latTo) * pow(sin($lonDelta / 2), 2)));
+        $angle = 2 * asin(sqrt(pow(sin($latDelta / 2), 2) + cos($latFrom) * cos($latTo) * pow(sin($lonDelta / 2), 2)));
         return $angle * $earthRadius;
     }
 
@@ -80,7 +74,7 @@ class DonorRepository implements DonorRepositoryInterface
         if ($lastDonation) {
             return [
                 'success' => false,
-                'message' => 'You can only donate blood once every 3 months.'
+                'message' => 'You can only donate blood once every 3 months.',
             ];
         }
 
@@ -96,9 +90,9 @@ class DonorRepository implements DonorRepositoryInterface
 
         try {
             if ($request->hasFile('request_form')) {
-                $imageName = time().'.'.$request->file('request_form')->getClientOriginalExtension();
+                $imageName = time() . '.' . $request->file('request_form')->getClientOriginalExtension();
                 $request->file('request_form')->move(public_path('assets/donor_proofs'), $imageName);
-                $validated['request_form'] = 'assets/donor_proofs/'.$imageName;
+                $validated['request_form'] = 'assets/donor_proofs/' . $imageName;
             }
 
             $validated['user_id'] = auth()->id();
@@ -142,9 +136,9 @@ class DonorRepository implements DonorRepositoryInterface
             }
 
             $file = $request->file('request_form');
-            $fileName = 'donation_'.time().'_'.auth()->id().'.'.$file->getClientOriginalExtension();
+            $fileName = 'donation_' . time() . '_' . auth()->id() . '.' . $file->getClientOriginalExtension();
             $file->move(public_path('assets/donor_proofs'), $fileName);
-            $validated['request_form'] = 'assets/donor_proofs/'.$fileName;
+            $validated['request_form'] = 'assets/donor_proofs/' . $fileName;
         }
 
         $donation->update($validated);

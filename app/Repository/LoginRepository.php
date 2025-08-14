@@ -4,51 +4,48 @@ namespace App\Repository;
 
 use App\Repository\interfaces\LoginRepositoryInterface;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use App\Models\User;
+use Illuminate\Support\Facades\Hash;
 
 class LoginRepository implements LoginRepositoryInterface
 {
     public function login(Request $request)
     {
-        // Validate input
         $request->validate([
             'email' => 'required|email',
             'password' => 'required|string',
             'user_type' => 'required|in:receiver,donor,admin',
         ]);
 
-        $credentials = $request->only('email', 'password');
-        $remember = $request->has('remember');
+        $user = User::where('email', $request->email)->first();
 
-        // Admin login
-        if ($request->user_type === 'admin') {
-            if (Auth::guard('admin')->attempt($credentials, $remember)) {
-                return ['success' => true, 'redirect' => route('admin.dashboard')];
-            }
-        } else { // Receiver or Donor login
-            if (Auth::guard('web')->attempt($credentials, $remember)) {
-                $user = Auth::guard('web')->user();
-                if ($user->user_type === $request->user_type) {
-                    return ['success' => true, 'redirect' => route($request->user_type . '.dashboard')];
-                }
-                Auth::guard('web')->logout(); // Log out if type mismatch
-            }
+        if (!$user || !Hash::check($request->password, $user->password)) {
+            return ['success' => false, 'message' => 'Invalid credentials'];
         }
 
-        return ['success' => false, 'message' => 'Invalid credentials or user type'];
+        if ($user->user_type !== $request->user_type) {
+            return ['success' => false, 'message' => 'User type mismatch'];
+        }
+
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return [
+            'success' => true,
+            'message' => 'Login successful',
+            'access_token' => $token,
+            'token_type' => 'Bearer',
+            'user' => $user,
+        ];
     }
 
     public function logout(Request $request)
     {
-        if (Auth::guard('web')->check()) {
-            Auth::guard('web')->logout();
-        } elseif (Auth::guard('admin')->check()) {
-            Auth::guard('admin')->logout();
+        $user = $request->user();
+        if ($user) {
+            $user->tokens()->delete();
+            return ['success' => true, 'message' => 'Logged out successfully'];
         }
 
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
-
-        return ['success' => true, 'message' => 'Logged out successfully'];
+        return ['success' => false, 'message' => 'No authenticated user'];
     }
 }

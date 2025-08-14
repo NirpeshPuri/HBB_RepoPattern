@@ -6,11 +6,7 @@ use App\Repository\interfaces\ContactRepositoryInterface;
 
 class ContactController extends Controller
 {
-    private $contactRepo;
-
-    /**
-     * Inject the ContactRepositoryInterface.
-     */
+    protected $contactRepo;
     public function __construct(ContactRepositoryInterface $contactRepo)
     {
         $this->contactRepo = $contactRepo;
@@ -36,13 +32,16 @@ class ContactController extends Controller
             // Return JSON response (RESTful)
             return response()->json([
                 'success' => true,
-                'message' => 'Your message has been saved successfully!'
+                'message' => 'Your message has been saved successfully!',
             ]);
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Something went wrong. Please try again.'
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Something went wrong. Please try again.',
+                ],
+                500,
+            );
         }
     }
 }

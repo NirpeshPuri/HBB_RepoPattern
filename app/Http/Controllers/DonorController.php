@@ -1,16 +1,14 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Repositories\Interfaces\DonorRepositoryInterface;
+use App\Repository\interfaces\DonorRepositoryInterface;
 
 class DonorController extends Controller
 {
-    protected $donorRepo;
-
-    public function __construct(DonorRepositoryInterface $donorRepo)
+    public function __construct(protected DonorRepositoryInterface $donorRepo)
     {
         $this->donorRepo = $donorRepo;
     }

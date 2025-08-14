@@ -5,41 +5,64 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Repository\interfaces\BloodSearchRepositoryInterface;
-use App\Http\Request\BloodSearchRequest;
 
 class BloodSearchController extends Controller
 {
-    public function __construct(protected BloodSearchRepositoryInterface $bloodSearchRepo)
+    protected BloodSearchRepositoryInterface $repo;
+
+    public function __construct(BloodSearchRepositoryInterface $repo)
     {
+        $this->repo = $repo;
     }
 
-    /**
-     * GET /api/blood-requests
-     * List all blood requests of the authenticated user
-     */
+    // GET /blood-requests
     public function index()
     {
         $userId = Auth::id();
-        $requests = $this->bloodSearchRepo->getUserBloodRequests($userId);
+        $requests = $this->repo->getUserBloodRequests($userId);
 
         return response()->json([
             'success' => true,
-            'data' => $requests
+            'data' => $requests,
         ]);
     }
 
-    /**
-     * POST /api/blood-requests
-     * Create a new blood request
-     */
-    public function store(BloodSearchRequest $request)
+    // GET /blood-requests/{id}
+    public function show($id)
+    {
+        $request = $this->repo->getUserBloodRequestById(Auth::id(), $id);
+
+        if (!$request) {
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Not found',
+                ],
+                404,
+            );
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $request,
+        ]);
+    }
+
+    // POST /blood-requests
+    public function store(Request $request)
     {
         $user = Auth::user();
 
-        //$validated = $this->bloodSearchRepo->validateBloodRequest($request->all());
-        $validated= $request->validatedData();
+        // Validate request using repository
+        $validated = $this->repo->validateBloodRequest($request->all());
         if (!$validated['success']) {
-            return response()->json(['errors' => $validated['errors']], 422);
+            return response()->json(
+                [
+                    'success' => false,
+                    'errors' => $validated['errors'],
+                ],
+                422,
+            );
         }
 
         $data = $validated['data'];
@@ -48,142 +71,109 @@ class BloodSearchController extends Controller
         $data['email'] = $user->email;
         $data['phone'] = $user->phone;
 
+        // Handle file upload safely
         if ($request->hasFile('request_form')) {
-            $data['request_form'] = $this->bloodSearchRepo->storeRequestForm($request->file('request_form'));
+            try {
+                $data['request_form'] = $this->repo->storeRequestForm($request->file('request_form'));
+            } catch (\Exception $e) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'File upload failed',
+                        'error' => $e->getMessage(),
+                    ],
+                    500,
+                );
+            }
         }
 
-        $bloodRequest = $this->bloodSearchRepo->createBloodRequest($data);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Blood request created successfully.',
-            'data' => $bloodRequest
-        ], 201);
-    }
-
-    /**
-     * GET /api/blood-requests/{id}
-     * Show a single blood request
-     */
-    public function show($id)
-    {
-        $userId = Auth::id();
-        $bloodRequest = $this->bloodSearchRepo->getUserBloodRequestById($userId, $id);
-
-        if (!$bloodRequest) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Blood request not found'
-            ], 404);
+        // Create the blood request
+        try {
+            $bloodRequest = $this->repo->createBloodRequest($data);
+        } catch (\Exception $e) {
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Failed to create blood request',
+                    'error' => $e->getMessage(),
+                ],
+                500,
+            );
         }
 
-        return response()->json([
-            'success' => true,
-            'data' => $bloodRequest
-        ]);
+        return response()->json(
+            [
+                'success' => true,
+                'message' => 'Blood request submitted successfully',
+                'data' => $bloodRequest,
+            ],
+            201,
+        );
     }
 
-    /**
-     * PATCH /api/blood-requests/{id}
-     * Update an existing blood request
-     */
+    // PUT /blood-requests/{id}
     public function update(Request $request, $id)
     {
-        $userId = Auth::id();
-
-        $bloodRequest = $this->bloodSearchRepo->getUserBloodRequestById($userId, $id);
-        if (!$bloodRequest) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Blood request not found'
-            ], 404);
-        }
-
-        if (!$bloodRequest->canEdit()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cannot edit this request.'
-            ], 403);
-        }
-
-        $validated = $this->bloodSearchRepo->validateBloodRequest($request->all(), $id);
-
+        $validated = $this->repo->validateBloodRequest($request->all(), true);
         if (!$validated['success']) {
-            return response()->json(['errors' => $validated['errors']], 422);
+            return response()->json(
+                [
+                    'success' => false,
+                    'errors' => $validated['errors'],
+                ],
+                422,
+            );
         }
 
-        $data = $validated['data'];
-
-        if ($request->hasFile('request_form')) {
-            $data['request_form'] = $this->bloodSearchRepo->updateRequestForm($bloodRequest, $request->file('request_form'));
+        $updatedRequest = $this->repo->updateBloodRequest($id, $validated['data']);
+        if (!$updatedRequest) {
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Not found',
+                ],
+                404,
+            );
         }
-
-        $updatedRequest = $this->bloodSearchRepo->updateBloodRequest($id, $data);
 
         return response()->json([
             'success' => true,
-            'message' => 'Blood request updated successfully',
-            'data' => $updatedRequest
+            'data' => $updatedRequest,
         ]);
     }
 
-    /**
-     * DELETE /api/blood-requests/{id}
-     * Delete a blood request
-     */
+    // DELETE /blood-requests/{id}
     public function destroy($id)
     {
-        $userId = Auth::id();
-
-        $bloodRequest = $this->bloodSearchRepo->getUserBloodRequestById($userId, $id);
-        if (!$bloodRequest) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Blood request not found'
-            ], 404);
+        if (!$this->repo->deleteBloodRequest($id)) {
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Not found',
+                ],
+                404,
+            );
         }
-
-        if (!$bloodRequest->canEdit()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cannot delete this request.'
-            ], 403);
-        }
-
-        $this->bloodSearchRepo->deleteBloodRequest($bloodRequest);
 
         return response()->json([
             'success' => true,
-            'message' => 'Blood request deleted successfully'
+            'message' => 'Deleted successfully',
         ]);
     }
 
-    /**
-     * POST /api/blood-requests/{id}/payment
-     * Process payment for a blood request
-     */
-    public function processPayment(Request $request, $id)
+    // POST /blood-requests/nearby-admins
+    public function nearbyAdmins(Request $request)
     {
-        $userId = Auth::id();
-        $bloodRequest = $this->bloodSearchRepo->getUserBloodRequestById($userId, $id);
-
-        if (!$bloodRequest) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Blood request not found'
-            ], 404);
-        }
-
-        $validated = $request->validate([
-            'payment' => 'required|numeric|min:0'
+        $request->validate([
+            'latitude' => 'required|numeric',
+            'longitude' => 'required|numeric',
         ]);
 
-        $updatedRequest = $this->bloodSearchRepo->processPayment($bloodRequest, $validated['payment']);
+        $admins = $this->repo->findNearbyAdmins($request->latitude, $request->longitude);
 
         return response()->json([
             'success' => true,
-            'message' => 'Payment processed successfully',
-            'data' => $updatedRequest
+            'data' => $admins,
         ]);
     }
 }

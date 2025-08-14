@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Repositories\Interfaces\ProfileUpdateRepositoryInterface;
+use App\Repository\interfaces\ProfileUpdateRepositoryInterface;
 
 class ProfileUpdateController extends Controller
 {
@@ -15,23 +15,17 @@ class ProfileUpdateController extends Controller
         $this->profileRepo = $profileRepo;
     }
 
-    /**
-     * GET /api/profile
-     * Return authenticated user profile and blood types
-     */
+    // GET /api/profile
     public function show()
     {
         $data = $this->profileRepo->getProfile();
         return response()->json($data, 200);
     }
 
-    /**
-     * PUT /api/profile
-     * Update authenticated user profile
-     */
+    // PUT /api/profile
     public function update(Request $request)
     {
         $result = $this->profileRepo->updateProfile($request);
-        return response()->json($result, 200);
+        return response()->json($result, $result['success'] ? 200 : 422);
     }
 }

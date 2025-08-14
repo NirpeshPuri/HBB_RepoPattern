@@ -1,5 +1,7 @@
 <?php
+
 namespace App\Repository;
+
 use App\Repository\interfaces\RegisterRepositoryInterface;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
@@ -26,7 +28,7 @@ class RegisterRepository implements RegisterRepositoryInterface
     {
         return Validator::make($data, [
             'name' => ['required', 'regex:/^[A-Za-z]+[A-Za-z0-9]*$/', 'max:25'],
-            'age' => ['required', 'integer', 'min:16','max:65'],
+            'age' => ['required', 'integer', 'min:16', 'max:65'],
             'weight' => ['required', 'numeric', 'min:45', 'max:160'],
             'address' => ['required', 'regex:/^[A-Za-z0-9\s,\'.-]+$/', 'regex:/[A-Za-z]/', 'max:30'],
             'phone' => ['required', 'digits:10'],
