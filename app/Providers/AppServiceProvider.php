@@ -2,7 +2,7 @@
 
 namespace App\Providers;
 use Illuminate\Support\Facades\Route;
-
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use App\Repository\interfaces\AdminRepositoryInterface;
 use App\Repository\AdminRepository;
@@ -44,5 +44,7 @@ class AppServiceProvider extends ServiceProvider
         Route::middleware('api')->prefix('api')->group(base_path('routes/api.php'));
 
         Route::middleware('web')->group(base_path('routes/web.php'));
+
+        Schema::defaultStringLength(191);
     }
 }
